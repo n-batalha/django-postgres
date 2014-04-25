@@ -125,6 +125,54 @@ def create_view(connection, view_name, view_query, update=True, force=False):
     finally:
         cursor_wrapper.close()
 
+def drop_views(models_module, force=False):
+    """Drop the database views for a given models module."""
+    for name, view_cls in six.iteritems(vars(models_module)):
+        if not (isinstance(view_cls, type) and
+                issubclass(view_cls, View) and
+                hasattr(view_cls, 'sql')):
+            continue
+
+        try:
+            dropped = drop_view(connection, view_cls._meta.db_table, force=force)
+        except Exception as exc:
+            exc.view_cls = view_cls
+            exc.python_name = models_module.__name__ + '.' + name
+            raise
+        else:
+            yield dropped, view_cls, models_module.__name__ + '.' + name
+
+def drop_view(connection, view_name, force=False):
+    """
+    Drop a named view on a connection.
+
+    Returns True if the view was dropped, or
+    False if nothing was done.
+    
+    force=True will add CASCADE to the drop
+    """
+    cursor_wrapper = connection.cursor()
+    cursor = cursor_wrapper.cursor
+    try:
+        #force_required = False
+        # Determine if view already exists.
+        cursor.execute('SELECT COUNT(*) FROM pg_catalog.pg_class WHERE relname = %s;',
+                       [view_name])
+        view_exists = cursor.fetchone()[0] > 0
+        if not view_exists:
+            return 'NOTEXISTS'
+
+        if force:
+            cursor.execute('DROP VIEW {0} CASCADE;'.format(view_name))
+            ret = 'DROPPED'
+        else:
+            cursor.execute('DROP VIEW {0};'.format(view_name))
+            ret = 'DROPPED'
+
+        transaction.commit_unless_managed()
+        return ret
+    finally:
+        cursor_wrapper.close()
 
 
 def get_fields_by_name(model_cls, *field_names):

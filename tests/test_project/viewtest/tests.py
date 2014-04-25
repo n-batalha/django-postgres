@@ -49,3 +49,37 @@ class ViewTestCase(TestCase):
 
         self.assertTrue(
             models.Staffness.objects.filter(username='foo').exists())
+
+    def test_drop_views(self):
+        with closing(connection.cursor()) as cur:
+            cur.execute('''SELECT COUNT(*) FROM pg_views
+                        WHERE viewname LIKE 'viewtest_%';''')
+
+            count, = cur.fetchone()
+            self.assertEqual(count, 3)
+
+        call_command('drop_pgviews', *[], **{})
+
+        with closing(connection.cursor()) as cur:
+            cur.execute('''SELECT COUNT(*) FROM pg_views
+                        WHERE viewname LIKE 'viewtest_%';''')
+
+            count, = cur.fetchone()
+            self.assertEqual(count, 0)
+
+    def test_drop_views_with_force(self):
+        with closing(connection.cursor()) as cur:
+            cur.execute('''SELECT COUNT(*) FROM pg_views
+                        WHERE viewname LIKE 'viewtest_%';''')
+
+            count, = cur.fetchone()
+            self.assertEqual(count, 3)
+
+        call_command('drop_pgviews', *[], **{'force':True})
+
+        with closing(connection.cursor()) as cur:
+            cur.execute('''SELECT COUNT(*) FROM pg_views
+                        WHERE viewname LIKE 'viewtest_%';''')
+
+            count, = cur.fetchone()
+            self.assertEqual(count, 0)
