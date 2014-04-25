@@ -106,11 +106,25 @@ Creating the views is simple. Just run the ``sync_pgviews`` command::
     myapp.models.SimpleUser (myapp_simpleuser): created
     myapp.models.Staffness (myapp_staffness): created
 
+Dropping the Views
+==================
+
+Dropping the views is simple. Just run the ``drop_pgviews`` command::
+
+    $ ./manage.py drop_pgviews
+    Dropping views for django.contrib.auth.models
+    Dropping views for django.contrib.contenttypes.models
+    Dropping views for myapp.models
+    myapp.models.Superusers (myapp_superusers): dropped
+    myapp.models.SimpleUser (myapp_simpleuser): dropped
+    myapp.models.Staffness (myapp_staffness): dropped
+
+
 Migrations
 ==========
 
-Views play well with South migrations. If a migration modifies the underlying
-table(s) that a view depends on so as to break the view, that view will be
-silently deleted by Postgres. For this reason, it's important to run
-``sync_pgviews`` after ``migrate`` to ensure any required tables have been
-created/updated.
+If a South migration modifies the underlying table(s) that a view depends 
+on so as to break the view, that view may need to first be deleted.
+
+For this reason, you might need to run
+``drop_pgviews`` before ``migrate`` followed by ``sync_pgviews``.
