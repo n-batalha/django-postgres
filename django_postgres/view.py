@@ -66,8 +66,9 @@ def create_views(models_module, update=True, force=False):
             continue
 
         try:
+            materialize = issubclass(view_cls, MaterializedView)
             created = create_view(connection, view_cls._meta.db_table,
-                                  view_cls.sql, update=update, force=force)
+                                  view_cls.sql, update=update, force=force, materialize=materialize)
         except Exception as exc:
             exc.view_cls = view_cls
             exc.python_name = models_module.__name__ + '.' + name
@@ -76,7 +77,7 @@ def create_views(models_module, update=True, force=False):
             yield created, view_cls, models_module.__name__ + '.' + name
 
 
-def create_view(connection, view_name, view_query, update=True, force=False):
+def create_view(connection, view_name, view_query, update=True, force=False, materialize=False):
     """
     Create a named view on a connection.
 
@@ -111,11 +112,14 @@ def create_view(connection, view_name, view_query, update=True, force=False):
                 cursor.execute('DROP VIEW IF EXISTS check_conflict;')
 
         if not force_required:
-            cursor.execute('CREATE OR REPLACE VIEW {0} AS {1};'.format(view_name, view_query))
+            if materialize:
+                cursor.execute('CREATE {2} VIEW {0} AS {1};'.format(view_name, view_query, "MATERIALIZED" if materialize else ""))
+            else:
+                cursor.execute('CREATE OR REPLACE {2} VIEW {0} AS {1};'.format(view_name, view_query, "MATERIALIZED" if materialize else ""))
             ret = view_exists and 'UPDATED' or 'CREATED'
         elif force:
-            cursor.execute('DROP VIEW {0};'.format(view_name))
-            cursor.execute('CREATE VIEW {0} AS {1};'.format(view_name, view_query))
+            cursor.execute('DROP {1} VIEW {0};'.format(view_name, "MATERIALIZED" if materialize else ""))
+            cursor.execute('CREATE {2} VIEW {0} AS {1};'.format(view_name, view_query, "MATERIALIZED" if materialize else ""))
             ret = 'FORCED'
         else:
             ret = 'FORCE_REQUIRED'
@@ -134,7 +138,8 @@ def drop_views(models_module, force=False):
             continue
 
         try:
-            dropped = drop_view(connection, view_cls._meta.db_table, force=force)
+            materialize = issubclass(view_cls, MaterializedView)
+            dropped = drop_view(connection, view_cls._meta.db_table, force=force, materialize=materialize)
         except Exception as exc:
             exc.view_cls = view_cls
             exc.python_name = models_module.__name__ + '.' + name
@@ -142,7 +147,7 @@ def drop_views(models_module, force=False):
         else:
             yield dropped, view_cls, models_module.__name__ + '.' + name
 
-def drop_view(connection, view_name, force=False):
+def drop_view(connection, view_name, force=False, materialize=False):
     """
     Drop a named view on a connection.
 
@@ -163,10 +168,10 @@ def drop_view(connection, view_name, force=False):
             return 'NOTEXISTS'
 
         if force:
-            cursor.execute('DROP VIEW {0} CASCADE;'.format(view_name))
+            cursor.execute('DROP {1} VIEW {0} CASCADE;'.format(view_name, "MATERIALIZED" if materialize else ""))
             ret = 'DROPPED'
         else:
-            cursor.execute('DROP VIEW {0};'.format(view_name))
+            cursor.execute('DROP {1} VIEW {0};'.format(view_name, "MATERIALIZED" if materialize else ""))
             ret = 'DROPPED'
 
         transaction.commit_unless_managed()
@@ -230,6 +235,15 @@ class View(models.Model):
             return view_cls
 
     __metaclass__ = ViewMeta
+
+    class Meta:
+        abstract = True
+        managed = False
+
+class MaterializedView(View):
+    """ This view will be created as a materialized view """
+
+    #todo perhaps add a Refresh method
 
     class Meta:
         abstract = True

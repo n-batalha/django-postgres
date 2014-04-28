@@ -24,3 +24,15 @@ class SimpleUser(django_postgres.View):
 class Staffness(django_postgres.View):
     projection = ['auth.User.username', 'auth.User.is_staff']
     sql = str(auth_models.User.objects.only('username', 'is_staff').query)
+
+class SimpleUserMaterial(django_postgres.MaterializedView):
+    projection = ['auth.User.username', 'auth.User.password']
+    # The row_number() window function is needed so that Django sees some kind
+    # of 'id' field. We could also grab the one from `auth.User`, but this
+    # seemed like more fun :)
+    sql = """
+    SELECT
+        username,
+        password,
+        row_number() OVER () AS id
+    FROM auth_user;"""

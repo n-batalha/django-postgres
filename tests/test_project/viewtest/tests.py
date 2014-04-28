@@ -20,6 +20,14 @@ class ViewTestCase(TestCase):
 
             count, = cur.fetchone()
             self.assertEqual(count, 3)
+            
+        with closing(connection.cursor()) as cur:
+            cur.execute('''SELECT COUNT(*) FROM pg_matviews
+                        WHERE matviewname LIKE 'viewtest_%';''')
+
+            count, = cur.fetchone()
+            self.assertEqual(count, 1)
+            
 
     def test_wildcard_projection_gets_all_fields_from_projected_model(self):
         foo_user = auth.models.User.objects.create(
@@ -50,6 +58,24 @@ class ViewTestCase(TestCase):
         self.assertTrue(
             models.Staffness.objects.filter(username='foo').exists())
 
+    def test_materialized_view(self):
+        self.assertEqual(models.SimpleUser.objects.count(), 0)
+        self.assertEqual(models.SimpleUserMaterial.objects.count(), 0)
+
+        foo_user = auth.models.User.objects.create(
+            username='foo', is_superuser=True)
+        foo_user.set_password('blah')
+        foo_user.save()
+
+        self.assertEqual(models.SimpleUser.objects.count(), 1)
+        self.assertEqual(models.SimpleUserMaterial.objects.count(), 0)
+
+        #note: view was materialised when there were 0 users, so refresh it now
+        with closing(connection.cursor()) as cur:
+            cur.execute('''REFRESH MATERIALIZED VIEW %s;''' % models.SimpleUserMaterial._meta.db_table)
+
+        self.assertEqual(models.SimpleUserMaterial.objects.count(), 1)
+
     def test_drop_views(self):
         with closing(connection.cursor()) as cur:
             cur.execute('''SELECT COUNT(*) FROM pg_views
@@ -57,6 +83,13 @@ class ViewTestCase(TestCase):
 
             count, = cur.fetchone()
             self.assertEqual(count, 3)
+
+        with closing(connection.cursor()) as cur:
+            cur.execute('''SELECT COUNT(*) FROM pg_matviews
+                        WHERE matviewname LIKE 'viewtest_%';''')
+
+            count, = cur.fetchone()
+            self.assertEqual(count, 1)
 
         call_command('drop_pgviews', *[], **{})
 
@@ -67,6 +100,13 @@ class ViewTestCase(TestCase):
             count, = cur.fetchone()
             self.assertEqual(count, 0)
 
+        with closing(connection.cursor()) as cur:
+            cur.execute('''SELECT COUNT(*) FROM pg_matviews
+                        WHERE matviewname LIKE 'viewtest_%';''')
+
+            count, = cur.fetchone()
+            self.assertEqual(count, 0)
+            
     def test_drop_views_with_force(self):
         with closing(connection.cursor()) as cur:
             cur.execute('''SELECT COUNT(*) FROM pg_views
@@ -74,12 +114,26 @@ class ViewTestCase(TestCase):
 
             count, = cur.fetchone()
             self.assertEqual(count, 3)
+            
+        with closing(connection.cursor()) as cur:
+            cur.execute('''SELECT COUNT(*) FROM pg_matviews
+                        WHERE matviewname LIKE 'viewtest_%';''')
+
+            count, = cur.fetchone()
+            self.assertEqual(count, 1)
 
         call_command('drop_pgviews', *[], **{'force':True})
 
         with closing(connection.cursor()) as cur:
             cur.execute('''SELECT COUNT(*) FROM pg_views
                         WHERE viewname LIKE 'viewtest_%';''')
+
+            count, = cur.fetchone()
+            self.assertEqual(count, 0)
+
+        with closing(connection.cursor()) as cur:
+            cur.execute('''SELECT COUNT(*) FROM pg_matviews
+                        WHERE matviewname LIKE 'viewtest_%';''')
 
             count, = cur.fetchone()
             self.assertEqual(count, 0)

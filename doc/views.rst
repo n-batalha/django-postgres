@@ -62,6 +62,14 @@ You can create this view by just subclassing :class:`django_postgres.View`. In
 
         projection = ['myapp.Table.*', 'auth.User.username', 'auth.User.email']
 
+:class:`MaterializedView`
+=========================
+
+.. class:: django_postgres.MaterializedView
+
+  Inherit from this class to define your view as a materialized view 
+  (http://www.postgresql.org/docs/9.3/static/rules-materializedviews.html).
+
 
 Primary Keys
 ============
