@@ -7,6 +7,7 @@ import re
 
 from django.db import connection, transaction
 from django.db import models
+from django.apps import apps
 import psycopg2
 
 from . import six
@@ -89,45 +90,47 @@ def create_view(connection, view_name, view_query, update=True, force=False, mat
     (default: False) controls whether or not to drop the old view and create
     the new one.
     """
-    cursor_wrapper = connection.cursor()
-    cursor = cursor_wrapper.cursor
-    try:
-        force_required = False
-        # Determine if view already exists.
-        cursor.execute('SELECT COUNT(*) FROM pg_catalog.pg_class WHERE relname = %s;',
-                       [view_name])
-        view_exists = cursor.fetchone()[0] > 0
-        if view_exists and not update:
-            return 'EXISTS'
-        elif view_exists:
-            # Detect schema conflict by copying the original view, attempting to
-            # update this copy, and detecting errors.
-            cursor.execute('CREATE TEMPORARY VIEW check_conflict AS SELECT * FROM {0};'.format(view_name))
-            try:
-                cursor.execute('CREATE OR REPLACE TEMPORARY VIEW check_conflict AS {0};'.format(view_query))
-            except psycopg2.ProgrammingError:
-                force_required = True
-                cursor.connection.rollback()
-            finally:
-                cursor.execute('DROP VIEW IF EXISTS check_conflict;')
+    with transaction.atomic():
 
-        if not force_required:
-            if materialize:
+        cursor_wrapper = connection.cursor()
+        cursor = cursor_wrapper.cursor
+        try:
+            force_required = False
+            # Determine if view already exists.
+            cursor.execute('SELECT COUNT(*) FROM pg_catalog.pg_class WHERE relname = %s;',
+                           [view_name])
+            view_exists = cursor.fetchone()[0] > 0
+            if view_exists and not update:
+                return 'EXISTS'
+            elif view_exists:
+                # Detect schema conflict by copying the original view, attempting to
+                # update this copy, and detecting errors.
+                cursor.execute('CREATE TEMPORARY VIEW check_conflict AS SELECT * FROM {0};'.format(view_name))
+                try:
+                    cursor.execute('CREATE OR REPLACE TEMPORARY VIEW check_conflict AS {0};'.format(view_query))
+                except psycopg2.ProgrammingError:
+                    force_required = True
+                    cursor.connection.rollback()
+                finally:
+                    cursor.execute('DROP VIEW IF EXISTS check_conflict;')
+
+            if not force_required:
+                if materialize:
+                    cursor.execute('CREATE {2} VIEW {0} AS {1};'.format(view_name, view_query, "MATERIALIZED" if materialize else ""))
+                else:
+                    cursor.execute('CREATE OR REPLACE {2} VIEW {0} AS {1};'.format(view_name, view_query, "MATERIALIZED" if materialize else ""))
+                ret = view_exists and 'UPDATED' or 'CREATED'
+            elif force:
+                cursor.execute('DROP {1} VIEW {0};'.format(view_name, "MATERIALIZED" if materialize else ""))
                 cursor.execute('CREATE {2} VIEW {0} AS {1};'.format(view_name, view_query, "MATERIALIZED" if materialize else ""))
+                ret = 'FORCED'
             else:
-                cursor.execute('CREATE OR REPLACE {2} VIEW {0} AS {1};'.format(view_name, view_query, "MATERIALIZED" if materialize else ""))
-            ret = view_exists and 'UPDATED' or 'CREATED'
-        elif force:
-            cursor.execute('DROP {1} VIEW {0};'.format(view_name, "MATERIALIZED" if materialize else ""))
-            cursor.execute('CREATE {2} VIEW {0} AS {1};'.format(view_name, view_query, "MATERIALIZED" if materialize else ""))
-            ret = 'FORCED'
-        else:
-            ret = 'FORCE_REQUIRED'
+                ret = 'FORCE_REQUIRED'
 
-        transaction.commit_unless_managed()
-        return ret
-    finally:
-        cursor_wrapper.close()
+            return ret
+        finally:
+            cursor_wrapper.close()
+
 
 def drop_views(models_module, force=False):
     """Drop the database views for a given models module."""
@@ -156,28 +159,28 @@ def drop_view(connection, view_name, force=False, materialize=False):
     
     force=True will add CASCADE to the drop
     """
-    cursor_wrapper = connection.cursor()
-    cursor = cursor_wrapper.cursor
-    try:
-        #force_required = False
-        # Determine if view already exists.
-        cursor.execute('SELECT COUNT(*) FROM pg_catalog.pg_class WHERE relname = %s;',
-                       [view_name])
-        view_exists = cursor.fetchone()[0] > 0
-        if not view_exists:
-            return 'NOTEXISTS'
+    with transaction.atomic():
+        cursor_wrapper = connection.cursor()
+        cursor = cursor_wrapper.cursor
+        try:
+            #force_required = False
+            # Determine if view already exists.
+            cursor.execute('SELECT COUNT(*) FROM pg_catalog.pg_class WHERE relname = %s;',
+                           [view_name])
+            view_exists = cursor.fetchone()[0] > 0
+            if not view_exists:
+                return 'NOTEXISTS'
 
-        if force:
-            cursor.execute('DROP {1} VIEW {0} CASCADE;'.format(view_name, "MATERIALIZED" if materialize else ""))
-            ret = 'DROPPED'
-        else:
-            cursor.execute('DROP {1} VIEW {0};'.format(view_name, "MATERIALIZED" if materialize else ""))
-            ret = 'DROPPED'
+            if force:
+                cursor.execute('DROP {1} VIEW {0} CASCADE;'.format(view_name, "MATERIALIZED" if materialize else ""))
+                ret = 'DROPPED'
+            else:
+                cursor.execute('DROP {1} VIEW {0};'.format(view_name, "MATERIALIZED" if materialize else ""))
+                ret = 'DROPPED'
 
-        transaction.commit_unless_managed()
-        return ret
-    finally:
-        cursor_wrapper.close()
+            return ret
+        finally:
+            cursor_wrapper.close()
 
 
 def get_fields_by_name(model_cls, *field_names):
@@ -228,8 +231,7 @@ class View(models.Model):
                 _DEFERRED_PROJECTIONS[model_spec][view_cls].append(field_name)
                 # If the model has already been loaded, run
                 # `realize_deferred_projections()` on it.
-                model_cls = models.get_model(app_label, model_name,
-                                             seed_cache=False)
+                model_cls = apps.get_registered_model(app_label, model_name)
                 if model_cls is not None:
                     realize_deferred_projections(model_cls)
             return view_cls
